@@ -241,11 +241,14 @@ plt.show()
 
 # Predator
 fig, ax = plt.subplots(figsize=(8, 6))
-sns.kdeplot(pf_boot.hist.X[n][:, 0], ax=ax, fill=True,
+sns.kdeplot(x=pf_boot.hist.X[n][:, 0], 
+            weights=pf_boot.hist.wgts[n].W[:, 0], ax=ax, fill=True,
             color="skyblue", label="Boot")
-sns.kdeplot(pf_guided.hist.X[n][:, 0], ax=ax, fill=True,
+sns.kdeplot(x=pf_guided.hist.X[n][:, 0],
+            weights=pf_guided.hist.wgts[n].W[:, 0], ax=ax, fill=True,
             color="lightcoral", label="Guided")
-sns.kdeplot(pf_guided_lf.hist.X[n][:, 0], ax=ax, fill=True,
+sns.kdeplot(x=pf_guided_lf.hist.X[n][:, 0],
+            weights=pf_guided_lf.hist.wgts[n].W[:, 0], ax=ax, fill=True,
             color="gold", label="Guided-LF")
 ax.axvline(x=pred_vals[n], color='red', linestyle=':', linewidth=1.5, 
            label='True log-pop')
@@ -258,11 +261,14 @@ plt.show()
 
 # Prey
 fig, ax = plt.subplots(figsize=(8, 6))
-sns.kdeplot(pf_boot.hist.X[n][:, 1], ax=ax, fill=True,
+sns.kdeplot(x=pf_boot.hist.X[n][:, 1],
+            weights=pf_boot.hist.wgts[n].W[:, 1], ax=ax, fill=True,
             color="skyblue", label="Boot")
-sns.kdeplot(pf_guided.hist.X[n][:, 1], ax=ax, fill=True,
+sns.kdeplot(x=pf_guided.hist.X[n][:, 1],
+            weights=pf_guided.hist.wgts[n].W[:, 1], ax=ax, fill=True,
             color="lightcoral", label="Guided")
-sns.kdeplot(pf_guided_lf.hist.X[n][:, 1], ax=ax, fill=True,
+sns.kdeplot(x=pf_guided_lf.hist.X[n][:, 1],
+            weights=pf_guided_lf.hist.wgts[n].W[:, 1], ax=ax, fill=True,
             color="gold", label="Guided-LF")
 ax.axvline(x=prey_vals[n], color='red', linestyle=':', linewidth=1.5, 
            label='True log-pop')

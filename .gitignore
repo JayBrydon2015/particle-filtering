@@ -1,1 +1,4 @@
-*__pycache*
+/.spyproject/
+/Backup Files/
+/particles/datasets/
+**/__pycache__/

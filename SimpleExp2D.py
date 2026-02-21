@@ -21,7 +21,7 @@ K = 0.8 # Nudge factor of guided P
 
 def get_obs(t):
     """ Returns true if an observation is aquired at this time. """
-    return t > 0 and t % DELTA_T == 0
+    return t > 0 #and t % DELTA_T == 0
 
 class SimpleExpGrowth2D(ssm.StateSpaceModel):
     """
@@ -57,9 +57,12 @@ class SimpleExpGrowth_proposal(SimpleExpGrowth2D): # A non-optimal proposal
         else:
             mut_0 = self.alpha * xp[:,0] - self.beta * xp[:,1]
             mut_1 = self.alpha * xp[:,1] - (1-self.beta) * xp[:,0]
-            nudge = K * (data[t] - mut_0)
-            new_mut_0 = mut_0 + nudge
-            return dists.MvNormal(loc=np.vstack((new_mut_0, mut_1)).T,
+            C = np.cov(xp, rowvar=False)
+            # Getting error with broadcasting. I'll sort this later
+            nudge = K * (data[t] - mut_0) * np.array([C[0,0], C[1,1]])
+            new_mut_0 = mut_0 + nudge[0]
+            new_mut_1 = mut_1 + nudge[1]
+            return dists.MvNormal(loc=np.vstack((new_mut_0, new_mut_1)).T,
                                   scale=self.sigma, cov=self.cov)
 
 class SimpleExpGrowth_proposal_lf(SimpleExpGrowth2D): # A non-optimal proposal
@@ -98,16 +101,22 @@ class SimpleExpGrowth_proposal_lf(SimpleExpGrowth2D): # A non-optimal proposal
             
             mut_0 = self.alpha * xp[:,0] - self.beta * xp[:,1]
             mut_1 = self.alpha * xp[:,1] - (1-self.beta) * xp[:,0]
-            nudge = K * (data_t_est - mut_0)
-            new_mut_0 = mut_0 + nudge
-            return dists.MvNormal(loc=np.vstack((new_mut_0, mut_1)).T,
+            C = np.cov(xp, rowvar=False)
+            # Getting error with broadcasting. I'll sort this later
+            nudge = K * (data_t_est - mut_0) * np.array([C[0,0], C[1,1]])
+            new_mut_0 = mut_0 + nudge[0]
+            new_mut_1 = mut_1 + nudge[1]
+            return dists.MvNormal(loc=np.vstack((new_mut_0, new_mut_1)).T,
                                   scale=self.sigma, cov=self.cov)
         else:
             mut_0 = self.alpha * xp[:,0] - self.beta * xp[:,1]
             mut_1 = self.alpha * xp[:,1] - (1-self.beta) * xp[:,0]
-            nudge = K * (data[t] - mut_0)
-            new_mut_0 = mut_0 + nudge
-            return dists.MvNormal(loc=np.vstack((new_mut_0, mut_1)).T,
+            C = np.cov(xp, rowvar=False)
+            # Getting error with broadcasting. I'll sort this later
+            nudge = K * (data[t] - mut_0) * np.array([C[0,0], C[1,1]])
+            new_mut_0 = mut_0 + nudge[0]
+            new_mut_1 = mut_1 + nudge[1]
+            return dists.MvNormal(loc=np.vstack((new_mut_0, new_mut_1)).T,
                                   scale=self.sigma, cov=self.cov)
 
 ## Define parameters ##
@@ -126,7 +135,7 @@ t_obs = [t for t in range(T+1) if get_obs(t)]
 t_system = range(T+1)
 
 ## Number of particles for PFs ##
-N = 100
+N = 10000
 
 seg_ssm = SimpleExpGrowth_proposal(mu0 = mu0, sigma0 = sigma0, cov0 = cov0, 
                           sigma = sigma, cov = cov, 
@@ -300,6 +309,7 @@ n = 1
 
 ## Box plots ##
 
+# Boxplots aren't correct because weights aren't included. See KDEs
 plt.boxplot([pf_boot.hist.X[n][:, 0], pf_guided.hist.X[n][:, 0], 
              pf_guided_lf.hist.X[n][:, 0]],
             tick_labels=["Boot", "Guided", "Guided-LF"])
@@ -320,15 +330,42 @@ plt.ylabel('Value')
 plt.legend()
 plt.show()
 
+# %%
+
 ## KDEs ##
 
+# Add theoretical filtering distribution: t = 1 (Need data at t=1)
+A = np.array([[alpha, -beta], [-(1-beta), alpha]])
+sigma0_2 = np.array([[1, 0], [0, 1]])
+sigma_2 = np.array([[0.6**2, 0], [0, 0.9**2]])
+Q1 = A @ sigma0_2 @ A.T + sigma_2
+H = np.array([[1, 0]])
+KC = Q1 @ H.T @ np.linalg.inv( H @ Q1 @ H.T + gamma ** 2 )
+m1 = A @ mu0.reshape(2, 1)
+filt_mean = m1 + KC @ (data[1] - H @ m1)
+filt_var = (np.identity(2) - KC @ H) @ Q1
+
+# %%
+
+x_grid_0 = np.linspace(-1.4, -0.4, 300)
+filt_pdf_vals_0 = stats.norm.pdf(x_grid_0, filt_mean[0], np.sqrt(filt_var[0, 0]))
+
+x_grid_1 = np.linspace(-4, 5, 300)
+filt_pdf_vals_1 = stats.norm.pdf(x_grid_1, filt_mean[1], np.sqrt(filt_var[1, 1]))
+
+# %%
 fig, ax = plt.subplots(figsize=(8, 6))
-sns.kdeplot(pf_boot.hist.X[n][:, 0], ax=ax, fill=True,
+plt.xlim(-1.4, -0.4)
+sns.kdeplot(x=pf_boot.hist.X[n][:, 0], 
+            weights=pf_boot.hist.wgts[n].W, ax=ax, fill=True,
             color="skyblue", label="Boot")
-sns.kdeplot(pf_guided.hist.X[n][:, 0], ax=ax, fill=True,
+sns.kdeplot(x=pf_guided.hist.X[n][:, 0],
+            weights=pf_guided.hist.wgts[n].W, ax=ax, fill=True,
             color="lightcoral", label="Guided")
-sns.kdeplot(pf_guided_lf.hist.X[n][:, 0], ax=ax, fill=True,
+sns.kdeplot(x=pf_guided_lf.hist.X[n][:, 0],
+            weights=pf_guided_lf.hist.wgts[n].W, ax=ax, fill=True,
             color="gold", label="Guided-LF")
+ax.plot(x_grid_0, filt_pdf_vals_0, label="True Filtering PDF", linestyle="--")
 ax.axvline(x=true_states_0[n], color='red', linestyle=':', linewidth=1.5, 
            label='True state')
 ax.set_xlabel("Value")
@@ -339,12 +376,16 @@ plt.grid(True, linestyle='--', alpha=0.7)
 plt.show()
 
 fig, ax = plt.subplots(figsize=(8, 6))
-sns.kdeplot(pf_boot.hist.X[n][:, 1], ax=ax, fill=True,
+sns.kdeplot(x=pf_boot.hist.X[n][:, 1],
+            weights=pf_boot.hist.wgts[n].W, ax=ax, fill=True,
             color="skyblue", label="Boot")
-sns.kdeplot(pf_guided.hist.X[n][:, 1], ax=ax, fill=True,
+sns.kdeplot(x=pf_guided.hist.X[n][:, 1],
+            weights=pf_guided.hist.wgts[n].W, ax=ax, fill=True,
             color="lightcoral", label="Guided")
-sns.kdeplot(pf_guided_lf.hist.X[n][:, 1], ax=ax, fill=True,
+sns.kdeplot(x=pf_guided_lf.hist.X[n][:, 1],
+            weights=pf_guided_lf.hist.wgts[n].W, ax=ax, fill=True,
             color="gold", label="Guided-LF")
+ax.plot(x_grid_1, filt_pdf_vals_1, label="True Filtering PDF", linestyle="--")
 ax.axvline(x=true_states_1[n], color='purple', linestyle=':', linewidth=1.5, 
            label='True state')
 ax.set_xlabel("Value")
@@ -353,44 +394,3 @@ ax.set_title("Filtering Dists @ t=n: state 1")
 ax.legend()
 plt.grid(True, linestyle='--', alpha=0.7)
 plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# %%
-
-
-

@@ -17,11 +17,11 @@ from particles.collectors import Moments
 
 ## Constants ##
 DELTA_T = 2 # Data collected every DELTA_T-th time.
-K = 0.08 # Nudge factor of guided P
+K = 0.2 # Nudge factor of guided P. Not too large.
 
 def get_obs(t):
     """ Returns true if an observation is aquired at this time. """
-    return t > 0 and t % DELTA_T == 0
+    return t > 0 #and t % DELTA_T == 0
 
 class SimpleExpGrowth(ssm.StateSpaceModel):
     """
@@ -90,6 +90,7 @@ class SimpleExpGrowth_proposal_lf(SimpleExpGrowth): # A non-optimal proposal
             mu = self.alpha * xp
             nudge = K * (data_t_est - mu)
             proposal_sigma = self.sigma + self.gamma
+            # data[t] = data_t_est # This bad?
             return dists.Normal(loc = nudge + mu, scale = proposal_sigma)
         else:
             mu = self.alpha * xp
@@ -98,8 +99,8 @@ class SimpleExpGrowth_proposal_lf(SimpleExpGrowth): # A non-optimal proposal
             return dists.Normal(loc = nudge + mu, scale = proposal_sigma)
 
 ## Define parameters ##
-mu0 = 3; sigma0 = 0.8 # Initial dist. parameters
-sigma = 0.3 # Propagation noise
+mu0 = 3; sigma0 = 0.5 # Initial dist. parameters
+sigma = 0.2 # Propagation noise
 gamma = 0.05 # Observation noise
 alpha = 1.05 # Growth rate
 
@@ -238,26 +239,38 @@ plt.ylabel('Value')
 plt.legend()
 plt.show()
 
-## KDEs ##
+## KDEs & Histograms ##
 
-plt.figure()
-plt.subplot(311)
-plt.hist(pf_boot.hist.X[n], weights=pf_boot.hist.wgts[n].W)
-plt.xlim([0,6])
-plt.subplot(312)
-plt.hist(pf_guided.hist.X[n], weights=pf_guided.hist.wgts[n].W)
-plt.xlim([0,6])
-plt.subplot(313)
-plt.hist(pf_guided_lf.hist.X[n], weights=pf_guided_lf.hist.wgts[n].W)
-plt.xlim([0,6])
+#plt.figure()
+#plt.subplot(311)
+#plt.hist(pf_boot.hist.X[n], weights=pf_boot.hist.wgts[n].W)
+#plt.xlim([0,6])
+#plt.subplot(312)
+#plt.hist(pf_guided.hist.X[n], weights=pf_guided.hist.wgts[n].W)
+#plt.xlim([0,6])
+#plt.subplot(313)
+#plt.hist(pf_guided_lf.hist.X[n], weights=pf_guided_lf.hist.wgts[n].W)
+#plt.xlim([0,6])
+
+# %%
+
+# Add theoretical filtering distribution: t = 1 (Need data at t=1)
+Q1 = alpha ** 2 * sigma0 ** 2 + sigma ** 2
+KC = Q1 / (Q1 + gamma ** 2)
+filt_mean = alpha * mu0 + KC * (data[1] - alpha * mu0)
+filt_var = Q1 * gamma ** 2 / (Q1 + gamma ** 2)
+x_grid = np.linspace(2.9, 3.4, 300)
+filt_pdf_vals = stats.norm.pdf(x_grid, filt_mean, np.sqrt(filt_var))
 
 fig, ax = plt.subplots(figsize=(8, 6))
-sns.kdeplot(pf_boot.hist.X[n], weights=pf_boot.hist.wgts[n].W, ax=ax, fill=True,
+plt.xlim(2.9, 3.4)
+sns.kdeplot(x=pf_boot.hist.X[n], weights=pf_boot.hist.wgts[n].W, ax=ax, fill=True,
             color="skyblue", label="Boot")
-sns.kdeplot(pf_guided.hist.X[n], weights=pf_guided.hist.wgts[n].W, ax=ax, fill=True,
+sns.kdeplot(x=pf_guided.hist.X[n], weights=pf_guided.hist.wgts[n].W, ax=ax, fill=True,
             color="lightcoral", label="Guided")
-sns.kdeplot(pf_guided_lf.hist.X[n], weights=pf_guided_lf.hist.wgts[n].W, ax=ax, fill=True,
+sns.kdeplot(x=pf_guided_lf.hist.X[n], weights=pf_guided_lf.hist.wgts[n].W, ax=ax, fill=True,
             color="gold", label="Guided-LF")
+ax.plot(x_grid, filt_pdf_vals, label="True Filtering PDF", linestyle="--")
 ax.axvline(x=true_states[n], color='red', linestyle=':', linewidth=1.5, 
            label='True state')
 ax.set_xlabel("Value")

@@ -649,6 +649,27 @@ class DiscreteUniform(DiscreteDist):
         return random.randint(self.lo, high=self.hi, size=size)
 
 
+class DiscreteDirac(DiscreteDist):
+    """Discrete (Integer) Dirac mass."""
+
+    def __init__(self, loc=0):
+        self.loc = loc
+
+    def rvs(self, size=None):
+        if isinstance(self.loc, np.ndarray):
+            return self.loc.copy()
+            # seems safer to make a copy here
+        else:  # a scalar
+            N = 1 if size is None else size
+            return np.full(N, self.loc)
+
+    def logpdf(self, x):
+        return np.where(x == self.loc, 0.0, -np.inf)
+
+    def ppf(self, u):
+        return self.rvs(size=u.shape[0])
+
+
 #########################
 # distribution transforms
 #########################
