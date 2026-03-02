@@ -4,13 +4,15 @@
 
 """ PF for inferring rates of CTMC """
 
-## Imports; functions; SSM classes ##
+## Imports ##
 
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import xarray as xr
+from math import comb
+from scipy.special import gammaln
 
 # Particles package
 import particles
@@ -68,7 +70,7 @@ def lams_idx_to_gen_pos(idx, n):
     """ Returns the i, j position of the lambda given its index
         in the lams array and the number of CMTC states n. """
     i = idx // (n-1)
-    j = idx % (n-1)
+    j = idx %  (n-1)
     if i <= j:
         j += 1
     return i, j
@@ -132,6 +134,7 @@ class AugCTMC(augssm.AugmentedStateSpaceModel):
     
     def get_cat_dist(self, P_mat, y_i):
         return dists.Categorical(P_mat[np.arange(P_mat.shape[0]), y_i])
+        # return dists.Categorical(P_mat[:, y_i])
 
     def PY(self, t, xp, x, datap=None):
         ## y ##
@@ -157,15 +160,41 @@ class AugCTMC_prop(AugCTMC):
     def proposal0(self, data):
         return self.PX0()
     
+    def compute_transition_count(self, datap, data):
+        return np.bincount(self.n * datap.reshape(-1) + data.reshape(-1),
+                minlength=self.n * self.n).reshape(self.n, self.n)
+    
+    def compute_numerator_or_denominator(self, mu, n, a, b, m):
+        return ((-1) ** m * comb(a, m) *
+                (1 / DELTA_T + DELTA_T * (b + m)) ** (-mu / DELTA_T - n))
+    
+    def get_nth_moment(self, mu, n, a, b):
+        numerator_result = sum(
+            self.compute_numerator_or_denominator(mu, n, a, b, m)
+            for m in range(a+1)
+        )
+        denominator_result = sum(
+            self.compute_numerator_or_denominator(mu, 0, a, b, m)
+            for m in range(a+1)
+        )
+        R = np.exp( gammaln((mu + n) / DELTA_T) - gammaln(mu / DELTA_T) )
+        return R * numerator_result / denominator_result
+    
     def proposal(self, t, xp, data):
-        lams_mean_est = np.mean(xp, axis=0)
-        lams_var_est  = np.var(xp, axis=0)
-        
-        alpha_ests = lams_mean_est ** 2 / lams_var_est
-        beta_ests = lams_mean_est / lams_var_est
-        
-        lams_dists = [dists.Gamma(alpha_ests[i], beta_ests[i])
-                      for i in range(xp.shape[1])]
+        lams_means = np.mean(xp, axis=0)
+        trans_count_mat = self.compute_transition_count(data[t-1], data[t])
+        lams_dists = []
+        for idx, mu in enumerate(lams_means):
+            p, q = lams_idx_to_gen_pos(idx, self.n)
+            # Compute a & b
+            a = trans_count_mat[p, q]
+            b = trans_count_mat[p, p]
+            # Compute first and second moments
+            first_mom  = self.get_nth_moment(mu, 1, a, b)
+            second_mom = self.get_nth_moment(mu, 2, a, b)
+            var = second_mom - first_mom ** 2
+            lams_dists.append(dists.Gamma(first_mom ** 2 / var,
+                                          first_mom / var))
         return dists.IndepProd(*lams_dists)
 
 
@@ -179,7 +208,7 @@ true_time = np.array([DELTA_T*i for i in range(T+1)])
 
 
 ## Number of particles for PFs ##
-N = 800
+N = 1000
 
 
 ## Define SSM parameters ##
@@ -356,29 +385,31 @@ for lam_idx, lam in enumerate(true_lams.columns):
 
 ## Plot data over time ##
 
-data_plot = np.vstack(data)
-
-fig, axes = plt.subplots(
-    nrows=N_rws,
-    ncols=1,
-    sharex=True,
-    figsize=(8, 2.5 * n)
-)
-fig.suptitle("RW States Over Time", fontsize=14)
-
-# Ensure axes is always iterable (important if n == 1)
-if N_rws == 1:
-    axes = [axes]
-
-for i in range(N_rws):
-    axes[i].plot(t_system, data_plot[:, i])
-    axes[i].set_ylabel(f"RW #{i+1}")
-    axes[i].grid(True)
-
-axes[-1].set_xlabel("t")
-plt.tight_layout()
-plt.show()
-
+if N_rws <= 10:
+    data_plot = np.vstack(data)
+    
+    fig, axes = plt.subplots(
+        nrows=N_rws,
+        ncols=1,
+        sharex=True,
+        figsize=(8, 2.5 * n)
+    )
+    fig.suptitle("RW States Over Time", fontsize=14)
+    
+    # Ensure axes is always iterable (important if n == 1)
+    if N_rws == 1:
+        axes = [axes]
+    
+    for i in range(N_rws):
+        axes[i].plot(t_system, data_plot[:, i])
+        axes[i].set_ylabel(f"RW #{i+1}")
+        axes[i].grid(True)
+    
+    axes[-1].set_xlabel("t")
+    plt.tight_layout()
+    plt.show()
+else:
+    print(f"Too many random walkers to plot: {N_rws} RWs.")
 
 # %%
 
