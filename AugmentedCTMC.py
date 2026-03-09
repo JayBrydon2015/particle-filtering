@@ -13,6 +13,7 @@ import pandas as pd
 import xarray as xr
 from math import comb
 from scipy.special import gammaln
+from scipy.linalg import expm # For computing the matrix exp: e^A
 
 # Particles package
 import particles
@@ -76,7 +77,10 @@ def lams_idx_to_gen_pos(idx, n):
     return i, j
 
 def compute_transition_prob_matrix(lams, n):
-    return np.identity(n) + DELTA_T * lams_to_gen(lams)
+    ## Option 1 ##
+    # return np.identity(n) + DELTA_T * lams_to_gen(lams)
+    ## Option 2 ##
+    return expm(DELTA_T * lams_to_gen(lams))
 
 def get_obs(t):
     """ Returns true if an observation is aquired at this time. """
@@ -177,8 +181,14 @@ class AugCTMC_prop(AugCTMC):
             self.compute_numerator_or_denominator(mu, 0, a, b, m)
             for m in range(a+1)
         )
-        R = np.exp( gammaln((mu + n) / DELTA_T) - gammaln(mu / DELTA_T) )
-        return R * numerator_result / denominator_result
+        R = np.exp( gammaln(n + mu / DELTA_T) - gammaln(mu / DELTA_T) )
+        result = R * numerator_result / denominator_result
+        # print(f"a: {a}")
+        # print(f"b: {b}")
+        # print(f"numerator: {numerator_result}")
+        # print(f"denominator: {denominator_result}")
+        # print(f"result: {result}")
+        return result
     
     def proposal(self, t, xp, data):
         lams_means = np.mean(xp, axis=0)
@@ -190,33 +200,39 @@ class AugCTMC_prop(AugCTMC):
             a = trans_count_mat[p, q]
             b = trans_count_mat[p, p]
             # Compute first and second moments
+            # print(f"idx: {idx}")
+            # print(f"mu: {mu}")
+            if np.isnan(mu):
+                print(xp[:, idx])
+                raise ValueError("mu is np.nan!")
             first_mom  = self.get_nth_moment(mu, 1, a, b)
             second_mom = self.get_nth_moment(mu, 2, a, b)
             var = second_mom - first_mom ** 2
-            lams_dists.append(dists.Gamma(first_mom ** 2 / var,
-                                          first_mom / var))
+            alpha, beta = get_gamma_params_from_mean_var(first_mom, var)
+            lams_dists.append(dists.Gamma(alpha, beta))
         return dists.IndepProd(*lams_dists)
 
 
 # %%
 
 ## Define time period ##
-T = 300 # t = 0, 1, ..., T
+T = 2 # t = 0, 1, ..., T
 t_obs = [t for t in range(T+1) if get_obs(t)]
 t_system = range(T+1)
 true_time = np.array([DELTA_T*i for i in range(T+1)])
 
 
 ## Number of particles for PFs ##
-N = 1000
+N = 10
 
 
 ## Define SSM parameters ##
 n = 2 # Number of states in CTMC
 mu0 = np.array([2, 3])
-var0 = np.array([0.2, 0.2])
+# var0 = np.array([0.2, 0.2])
+var0 = np.array([100, 100])
 a0, b0 = get_gamma_params_from_mean_var(mu0, var0)
-N_rws = 2 # Number of random walkers traversing the CTMC
+N_rws = 1 # Number of random walkers traversing the CTMC
 
 
 ## Create CTMC SSM ##
@@ -229,33 +245,33 @@ ctmc_ssm_prop = AugCTMC_prop(a0=a0, b0=b0, n=n, N_rws=N_rws)
 ## Simulate true states and data manually ##
 
 # Sigmoid growth #
-true_states = [mu0.reshape(1, -1)]
-data = [np.sort(np.array([i % n for i in range(N_rws)])).reshape(1, -1)]
-for t in range(1, T+1):
-    # lams
-    lams_t = np.array([sigmoid(t, mu0[0], mu0[0]+1, T/2,
-                               SIGMOID_FUNC_CONST / T),
-                       sigmoid(t, mu0[1], mu0[1]+2, T/2,
-                               SIGMOID_FUNC_CONST / T)])
-    true_states.append(lams_t.reshape(1, -1))
-    
-    # y
-    P_mat = np.stack([compute_transition_prob_matrix(cur_lams, n)
-                      for cur_lams in true_states[-2]], axis=0)
-    y_t = np.array([dists.Categorical(P_mat[np.arange(P_mat.shape[0]), y_i]).rvs()
-                    for y_i in data[-1]])
-    data.append(y_t)
-
-# Constant rates #
-# true_states = [mu0.reshape(1, -1) for _ in range(T+1)]
+# true_states = [mu0.reshape(1, -1)]
 # data = [np.sort(np.array([i % n for i in range(N_rws)])).reshape(1, -1)]
 # for t in range(1, T+1):
+#     # lams
+#     lams_t = np.array([sigmoid(t, mu0[0], mu0[0]+1, T/2,
+#                                SIGMOID_FUNC_CONST / T),
+#                        sigmoid(t, mu0[1], mu0[1]+2, T/2,
+#                                SIGMOID_FUNC_CONST / T)])
+#     true_states.append(lams_t.reshape(1, -1))
+    
 #     # y
 #     P_mat = np.stack([compute_transition_prob_matrix(cur_lams, n)
 #                       for cur_lams in true_states[-2]], axis=0)
 #     y_t = np.array([dists.Categorical(P_mat[np.arange(P_mat.shape[0]), y_i]).rvs()
 #                     for y_i in data[-1]])
 #     data.append(y_t)
+
+# Constant rates #
+true_states = [mu0.reshape(1, -1) for _ in range(T+1)]
+data = [np.sort(np.array([i % n for i in range(N_rws)])).reshape(1, -1)]
+for t in range(1, T+1):
+    # y
+    P_mat = np.stack([compute_transition_prob_matrix(cur_lams, n)
+                      for cur_lams in true_states[-2]], axis=0)
+    y_t = np.array([dists.Categorical(P_mat[np.arange(P_mat.shape[0]), y_i]).rvs()
+                    for y_i in data[-1]])
+    data.append(y_t)
 
 # Linear growth #
 # ...
@@ -422,6 +438,7 @@ plt.title("ESS Over Time: Boot PF | "
           + f"N_RW={N_rws} N={N} DT={DELTA_T} C={C}")
 plt.show()
 
+# %%
 
 ## ESS: Guided ##
 
